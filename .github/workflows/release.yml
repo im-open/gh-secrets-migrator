@@ -21,15 +21,151 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Validate changelog entry exists
+      - name: Get previous tag
+        id: prev_tag
         run: |
-          VERSION=${{ steps.version.outputs.version }}
-          if ! grep -q "^## \[$VERSION\]" CHANGELOG.md; then
-            echo "::error::No changelog entry found for version $VERSION in CHANGELOG.md"
-            echo "Please add a changelog entry before releasing."
-            exit 1
+          set -euo pipefail
+          # Get the tag before the current one
+          PREV_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -2 | tail -1)
+          if [ -z "$PREV_TAG" ]; then
+            # If no previous tag, use the first commit
+            PREV_TAG=$(git rev-list --max-parents=0 HEAD)
           fi
-          echo "✅ Changelog entry found for version $VERSION"
+          echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+          echo "📌 Previous tag: $PREV_TAG"
+
+      - name: Generate and update CHANGELOG
+        run: |
+          set -e
+          VERSION=${{ steps.version.outputs.version }}
+          PREV_TAG=${{ steps.prev_tag.outputs.prev_tag }}
+          CURRENT_TAG="v$VERSION"
+          DATE=$(date -u +%Y-%m-%d)
+          
+          echo "📝 Generating changelog for $PREV_TAG..$CURRENT_TAG"
+          
+          # Generate commit list to a temp file
+          git log --format="%s (%h)" --no-merges "$PREV_TAG".."$CURRENT_TAG" | head -100 > /tmp/commits_raw.txt
+          
+          if [ ! -s /tmp/commits_raw.txt ]; then
+            echo "⚠️ No commits found between $PREV_TAG and $CURRENT_TAG"
+            echo "Release $VERSION" > /tmp/commits_raw.txt
+          fi
+          
+          # Categorize commits by type
+          > /tmp/added.txt
+          > /tmp/changed.txt
+          > /tmp/fixed.txt
+          > /tmp/other.txt
+          
+          while IFS= read -r line; do
+            # Extract message without the prefix for cleaner output
+            clean_msg=$(echo "$line" | sed -E 's/^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]*\))?!?:\s*//')
+            
+            if echo "$line" | grep -qE '^feat(\([^)]*\))?!?:'; then
+              echo "- $clean_msg" >> /tmp/added.txt
+            elif echo "$line" | grep -qE '^fix(\([^)]*\))?!?:'; then
+              echo "- $clean_msg" >> /tmp/fixed.txt
+            elif echo "$line" | grep -qE '^(refactor|perf|build|ci|style)(\([^)]*\))?!?:'; then
+              echo "- $clean_msg" >> /tmp/changed.txt
+            elif echo "$line" | grep -qE '^(docs|test|chore)(\([^)]*\))?!?:'; then
+              # Skip docs, test, chore commits from changelog
+              continue
+            else
+              echo "- $line" >> /tmp/other.txt
+            fi
+          done < /tmp/commits_raw.txt
+          
+          # Create the new changelog entry file
+          echo "## [$VERSION] - $DATE" > /tmp/new_entry.txt
+          
+          if [ -s /tmp/added.txt ]; then
+            echo "" >> /tmp/new_entry.txt
+            echo "### Added" >> /tmp/new_entry.txt
+            echo "" >> /tmp/new_entry.txt
+            cat /tmp/added.txt >> /tmp/new_entry.txt
+          fi
+          
+          if [ -s /tmp/changed.txt ]; then
+            echo "" >> /tmp/new_entry.txt
+            echo "### Changed" >> /tmp/new_entry.txt
+            echo "" >> /tmp/new_entry.txt
+            cat /tmp/changed.txt >> /tmp/new_entry.txt
+          fi
+          
+          if [ -s /tmp/fixed.txt ]; then
+            echo "" >> /tmp/new_entry.txt
+            echo "### Fixed" >> /tmp/new_entry.txt
+            echo "" >> /tmp/new_entry.txt
+            cat /tmp/fixed.txt >> /tmp/new_entry.txt
+          fi
+          
+          if [ -s /tmp/other.txt ]; then
+            echo "" >> /tmp/new_entry.txt
+            echo "### Other" >> /tmp/new_entry.txt
+            echo "" >> /tmp/new_entry.txt
+            cat /tmp/other.txt >> /tmp/new_entry.txt
+          fi
+          
+          # If no categorized commits, add a generic entry
+          if [ ! -s /tmp/added.txt ] && [ ! -s /tmp/changed.txt ] && [ ! -s /tmp/fixed.txt ] && [ ! -s /tmp/other.txt ]; then
+            echo "" >> /tmp/new_entry.txt
+            echo "- Release $VERSION" >> /tmp/new_entry.txt
+          fi
+          
+          echo "" >> /tmp/new_entry.txt
+          
+          # Find insertion point (after [Unreleased] section or after header)
+          if grep -n "^## \[Unreleased\]" CHANGELOG.md > /dev/null; then
+            # Find the next ## heading after [Unreleased]
+            UNRELEASED_LINE=$(grep -n "^## \[Unreleased\]" CHANGELOG.md | cut -d: -f1)
+            NEXT_SECTION=$(tail -n +"$((UNRELEASED_LINE + 1))" CHANGELOG.md | grep -n "^## \[" | head -1 | cut -d: -f1)
+            
+            if [ -n "$NEXT_SECTION" ]; then
+              INSERT_LINE=$((UNRELEASED_LINE + NEXT_SECTION))
+            else
+              # No next section, append at end
+              INSERT_LINE=$(wc -l < CHANGELOG.md)
+            fi
+          else
+            # No [Unreleased] section; insert at the first section heading, or end of file if none
+            FIRST_SECTION_LINE=$(grep -n "^## " CHANGELOG.md | head -1 | cut -d: -f1 || true)
+            if [ -n "$FIRST_SECTION_LINE" ]; then
+              INSERT_LINE=$FIRST_SECTION_LINE
+            else
+              INSERT_LINE=$(wc -l < CHANGELOG.md)
+            fi
+          fi
+          
+          # Reconstruct the file
+          TOTAL_LINES=$(wc -l < CHANGELOG.md)
+          if [ "$INSERT_LINE" -lt "$TOTAL_LINES" ]; then
+            # Insert within the file: take content up to INSERT_LINE, then new entry, then the rest
+            head -n "$INSERT_LINE" CHANGELOG.md > /tmp/changelog_new.md
+            cat /tmp/new_entry.txt >> /tmp/changelog_new.md
+            tail -n +"$((INSERT_LINE + 1))" CHANGELOG.md >> /tmp/changelog_new.md
+          else
+            # INSERT_LINE is at or beyond the end: append new entry after existing content
+            cat CHANGELOG.md > /tmp/changelog_new.md
+            cat /tmp/new_entry.txt >> /tmp/changelog_new.md
+          fi
+          mv /tmp/changelog_new.md CHANGELOG.md
+          
+          echo "✅ Changelog updated for version $VERSION"
+          echo "--- Preview ---"
+          head -40 CHANGELOG.md
+
+      - name: Commit and push CHANGELOG
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          if git diff --cached --quiet -- CHANGELOG.md; then
+            echo "No changes to commit"
+          else
+            git commit -m "docs: update CHANGELOG for v${{ steps.version.outputs.version }}"
+            git push origin HEAD:master
+          fi
 
       - name: Verify tests passed on master
         uses: actions/github-script@v8
