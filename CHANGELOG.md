@@ -6,6 +6,16 @@ This changelog is auto-generated from [Conventional Commits](https://www.convent
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.3.0] - 2026-01-21
+## [0.4.0] - 2026-01-26
+
+### Changed
+
+- Add token and fetch-depth to code checkout step (251214e)
+
+### Other
+
+- Add GitHub CLI extension support with PyInstaller binary compilation (#55) (c8d2b41)
+
 
 ### Added
 
