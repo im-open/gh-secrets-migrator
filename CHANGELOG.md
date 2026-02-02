@@ -10,6 +10,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Update getting previous tag logic to exclude current tag (5330ae7)
+- Add release notes download and update steps (d4a543e)
+
+## [0.5.0] - 2026-02-02
+
+### Added
+
 - Add release notes download and update steps (d4a543e)
 
 ## [0.5.0] - 2026-02-02
