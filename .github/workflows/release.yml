@@ -157,6 +157,18 @@ jobs:
           echo "✅ Changelog updated for version $VERSION"
           echo "--- Preview ---"
           head -40 CHANGELOG.md
+          
+          # Save the new entry for release notes (remove the version header for cleaner notes)
+          tail -n +2 /tmp/new_entry.txt > /tmp/release_notes.md
+          echo "--- Release Notes ---"
+          cat /tmp/release_notes.md
+
+      - name: Upload release notes artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: /tmp/release_notes.md
+          retention-days: 1
 
       - name: Commit and push CHANGELOG
         run: |
@@ -217,3 +229,21 @@ jobs:
         uses: cli/gh-extension-precompile@v2
         with:
           build_script_override: "script/build.sh"
+
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: /tmp
+
+      - name: Update release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          if [ -f /tmp/release_notes.md ]; then
+            gh release edit "$TAG_NAME" --notes-file /tmp/release_notes.md
+            echo "✅ Release notes updated for $TAG_NAME"
+          else
+            echo "⚠️ No release notes file found"
+          fi
