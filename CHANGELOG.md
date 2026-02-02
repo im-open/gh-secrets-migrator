@@ -14,6 +14,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [0.5.0] - 2026-02-02
 
+### Added
+
+- Add release notes download and update steps (d4a543e)
+
+## [0.5.0] - 2026-02-02
+
 - Release 0.5.0
 
 ## [0.4.0] - 2026-01-26
