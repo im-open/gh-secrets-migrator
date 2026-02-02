@@ -28,14 +28,21 @@ jobs:
         id: prev_tag
         run: |
           set -euo pipefail
-          # Get the tag before the current one
-          PREV_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -2 | tail -1)
+          CURRENT_TAG="v${{ steps.version.outputs.version }}"
+          echo "📌 Current tag: $CURRENT_TAG"
+          
+          # Get the tag before the current one by excluding it from the sorted list
+          PREV_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -v "^${CURRENT_TAG}$" | head -1)
+          
           if [ -z "$PREV_TAG" ]; then
             # If no previous tag, use the first commit
             PREV_TAG=$(git rev-list --max-parents=0 HEAD)
+            echo "📌 No previous tag found, using first commit: $PREV_TAG"
+          else
+            echo "📌 Previous tag: $PREV_TAG"
           fi
+          
           echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
-          echo "📌 Previous tag: $PREV_TAG"
 
       - name: Generate and update CHANGELOG
         run: |
