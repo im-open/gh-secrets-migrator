@@ -54,23 +54,34 @@ jobs:
           
           echo "📝 Generating changelog for $PREV_TAG..$CURRENT_TAG"
           
-          # Generate commit list to a temp file
-          git log --format="%s (%h)" --no-merges "$PREV_TAG".."$CURRENT_TAG" | head -100 > /tmp/commits_raw.txt
-          
-          if [ ! -s /tmp/commits_raw.txt ]; then
-            echo "⚠️ No commits found between $PREV_TAG and $CURRENT_TAG"
-            echo "Release $VERSION" > /tmp/commits_raw.txt
-          fi
-          
           # Categorize commits by type
           > /tmp/added.txt
           > /tmp/changed.txt
           > /tmp/fixed.txt
           > /tmp/other.txt
+          > /tmp/processed_messages.txt
           
-          while IFS= read -r line; do
+          # Function to categorize a single line
+          categorize_line() {
+            local line="$1"
+            local hash="$2"
+            
+            # Skip empty lines
+            [ -z "$line" ] && return
+            
+            # Skip if already processed (dedup)
+            if grep -qFx "$line" /tmp/processed_messages.txt 2>/dev/null; then
+              return
+            fi
+            echo "$line" >> /tmp/processed_messages.txt
+            
             # Extract message without the prefix for cleaner output
             clean_msg=$(echo "$line" | sed -E 's/^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]*\))?!?:\s*//')
+            
+            # Add hash if provided and not already in message
+            if [ -n "$hash" ] && ! echo "$clean_msg" | grep -qE '\([a-f0-9]+\)$'; then
+              clean_msg="$clean_msg ($hash)"
+            fi
             
             if echo "$line" | grep -qE '^feat(\([^)]*\))?!?:'; then
               echo "- $clean_msg" >> /tmp/added.txt
@@ -80,11 +91,63 @@ jobs:
               echo "- $clean_msg" >> /tmp/changed.txt
             elif echo "$line" | grep -qE '^(docs|test|chore)(\([^)]*\))?!?:'; then
               # Skip docs, test, chore commits from changelog
-              continue
+              return
             else
-              echo "- $line" >> /tmp/other.txt
+              # Only add to "other" if it looks like a meaningful message (not a merge commit title)
+              if ! echo "$line" | grep -qE '^Merge (pull request|branch)'; then
+                echo "- $clean_msg" >> /tmp/other.txt
+              fi
             fi
-          done < /tmp/commits_raw.txt
+          }
+          
+          # Process all commits (including merge commits) with full body
+          # Use a unique delimiter that won't appear in commit messages
+          DELIM="---COMMIT_END---"
+          
+          git log --format="%H%n%s%n%b%n$DELIM" "$PREV_TAG".."$CURRENT_TAG" | while IFS= read -r hash; do
+            # Read subject line
+            IFS= read -r subject || true
+            
+            # Read body lines until delimiter
+            body=""
+            while IFS= read -r bodyline; do
+              [ "$bodyline" = "$DELIM" ] && break
+              body="$body$bodyline"$'\n'
+            done
+            
+            short_hash="${hash:0:7}"
+            
+            # First, check if the subject itself is a conventional commit
+            if echo "$subject" | grep -qE '^(feat|fix|refactor|perf|build|ci|style|docs|test|chore|revert)(\([^)]*\))?!?:'; then
+              categorize_line "$subject" "$short_hash"
+            else
+              # Check for conventional commits in the body (e.g., squash merge descriptions)
+              found_in_body=false
+              echo "$body" | while IFS= read -r line; do
+                # Look for lines starting with conventional commit prefixes
+                if echo "$line" | grep -qE '^\* (feat|fix|refactor|perf|build|ci|style|docs|test|chore|revert)(\([^)]*\))?!?:'; then
+                  # Remove the leading "* " from squash merge format
+                  clean_line=$(echo "$line" | sed 's/^\* //')
+                  categorize_line "$clean_line" "$short_hash"
+                  found_in_body=true
+                elif echo "$line" | grep -qE '^(feat|fix|refactor|perf|build|ci|style|docs|test|chore|revert)(\([^)]*\))?!?:'; then
+                  categorize_line "$line" "$short_hash"
+                  found_in_body=true
+                fi
+              done
+              
+              # If nothing found in body and subject isn't a merge commit, add subject to other
+              if [ "$found_in_body" = false ] && ! echo "$subject" | grep -qE '^Merge (pull request|branch)'; then
+                categorize_line "$subject" "$short_hash"
+              fi
+            fi
+          done
+          
+          # Check if any commits were found
+          if [ ! -s /tmp/added.txt ] && [ ! -s /tmp/changed.txt ] && [ ! -s /tmp/fixed.txt ] && [ ! -s /tmp/other.txt ]; then
+            echo "⚠️ No categorizable commits found between $PREV_TAG and $CURRENT_TAG"
+            echo "- Release $VERSION" > /tmp/other.txt
+          fi
           
           # Create the new changelog entry file
           echo "## [$VERSION] - $DATE" > /tmp/new_entry.txt
@@ -115,12 +178,6 @@ jobs:
             echo "### Other" >> /tmp/new_entry.txt
             echo "" >> /tmp/new_entry.txt
             cat /tmp/other.txt >> /tmp/new_entry.txt
-          fi
-          
-          # If no categorized commits, add a generic entry
-          if [ ! -s /tmp/added.txt ] && [ ! -s /tmp/changed.txt ] && [ ! -s /tmp/fixed.txt ] && [ ! -s /tmp/other.txt ]; then
-            echo "" >> /tmp/new_entry.txt
-            echo "- Release $VERSION" >> /tmp/new_entry.txt
           fi
           
           echo "" >> /tmp/new_entry.txt
