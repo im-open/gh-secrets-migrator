@@ -4,7 +4,7 @@ import time
 from src.clients.github import GitHubClient
 from src.utils.logger import Logger
 from src.core.config import MigrationConfig
-from src.core.workflow_generator import generate_workflow
+from src.core.workflow_generator import generate_workflow, derive_web_host
 
 
 class Migrator:
@@ -13,8 +13,8 @@ class Migrator:
     def __init__(self, config: MigrationConfig, logger: Logger):
         self.config = config
         self.log = logger
-        self.source_api = GitHubClient(config.source_pat, logger)
-        self.target_api = GitHubClient(config.target_pat, logger)
+        self.source_api = GitHubClient(config.source_pat, logger, config.source_endpoint)
+        self.target_api = GitHubClient(config.target_pat, logger, config.target_endpoint)
     
     def _check_rate_limits(self, checkpoint: str) -> bool:
         """Check rate limits and warn if low.
@@ -163,7 +163,9 @@ class Migrator:
                     runs = workflow.get_runs(branch=branch_name, status=status)
                     for run in runs:
                         self.log.debug(f"Found workflow run {run.id} with status {status}")
-                        return f"https://github.com/{self.config.source_org}/{self.config.source_repo}/actions/runs/{run.id}"
+                        # Derive web host from source endpoint
+                        web_host = derive_web_host(self.config.source_endpoint)
+                        return f"{web_host}/{self.config.source_org}/{self.config.source_repo}/actions/runs/{run.id}"
                 except Exception as status_error:
                     self.log.debug(f"No {status} runs found: {status_error}")
                     continue
@@ -434,7 +436,9 @@ class Migrator:
                 self.config.target_org, target_repo,
                 branch_name,
                 env_secrets=None,
-                org_secrets=secrets_to_migrate
+                org_secrets=secrets_to_migrate,
+                source_endpoint=self.config.source_endpoint,
+                target_endpoint=self.config.target_endpoint
             )
             
             # Step 3: Create migration branch and push workflow
@@ -464,7 +468,9 @@ class Migrator:
             # Step 4: Workflow is now running asynchronously - provide URL for monitoring
             self.log.success("✓ Workflow triggered successfully!")
             
-            workflow_url = f"https://github.com/{self.config.source_org}/{self.config.source_repo}/actions/workflows/migrate-org-secrets.yml"
+            # Derive web host from source endpoint
+            web_host = derive_web_host(self.config.source_endpoint)
+            workflow_url = f"{web_host}/{self.config.source_org}/{self.config.source_repo}/actions/workflows/migrate-org-secrets.yml"
             self.log.success("✓ Organization secret migration started! Check the link below to monitor progress.")
             self.log.info(f"Monitor workflow progress here: {workflow_url}")
             
@@ -614,7 +620,9 @@ class Migrator:
             self.config.source_org, self.config.source_repo,
             self.config.target_org, self.config.target_repo, branch_name,
             env_secrets_info,
-            repo_secrets=secrets_to_migrate
+            repo_secrets=secrets_to_migrate,
+            source_endpoint=self.config.source_endpoint,
+            target_endpoint=self.config.target_endpoint
         )
         self.log.debug("Creating workflow file...")
         self.source_api.create_file(
@@ -647,9 +655,11 @@ class Migrator:
         else:
             # Fallback to generic actions page if we can't get the specific run
             self.log.debug("Could not find specific workflow run, using generic actions URL")
+            # Derive web host from source endpoint
+            web_host = derive_web_host(self.config.source_endpoint)
             self.log.success(
                 f"Secrets migration workflow triggered!\n"
-                f"View progress: https://github.com/{self.config.source_org}/{self.config.source_repo}/actions?query=branch%3Amigrate-secrets"
+                f"View progress: {web_host}/{self.config.source_org}/{self.config.source_repo}/actions?query=branch%3Amigrate-secrets"
             )
         
         self._check_rate_limits("migration_complete")
