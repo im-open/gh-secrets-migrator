@@ -1,5 +1,5 @@
 """Workflow generation for secrets migration."""
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from urllib.parse import urlparse
 # flake8: noqa: E501
 
@@ -158,13 +158,25 @@ def generate_environment_secret_steps(env_secrets: Dict[str, List[str]], source_
     return "\n".join(steps)
 
 
-def generate_org_secret_steps(org_secrets: List[str], target_org: str, target_endpoint: str = DEFAULT_GITHUB_ENDPOINT) -> str:
+def generate_org_secret_steps(
+    org_secrets: List[str],
+    target_org: str,
+    org_secrets_scope: Optional[Dict[str, Dict[str, Any]]] = None,
+    target_endpoint: str = DEFAULT_GITHUB_ENDPOINT
+) -> str:
     """Generate workflow steps for each organization secret.
     
     Args:
         org_secrets: List of organization secret names
                      Example: ['DB_PASSWORD', 'API_KEY', 'DEPLOY_TOKEN']
         target_org: Target organization
+        org_secrets_scope: Optional dict mapping secret names to their scope information
+                          Example: {
+                              'SECRET_NAME': {
+                                  'visibility': 'selected',
+                                  'selected_repositories': ['repo1', 'repo2']
+                              }
+                          }
         target_endpoint: Target GitHub API endpoint (default: https://api.github.com)
         
     Returns:
@@ -177,19 +189,152 @@ def generate_org_secret_steps(org_secrets: List[str], target_org: str, target_en
     gh_env_vars = f"GH_HOST: '{gh_host}'" if should_set_gh_host(target_endpoint) else ""
     
     for secret_name in org_secrets:
-        # Build env section with optional GH_HOST
-        env_lines = [
-            f"          TARGET_ORG: '{target_org}'",
-            f"          SECRET_NAME: '{secret_name}'",
-            f"          SECRET_VALUE: ${{{{ secrets.{secret_name} }}}}",
-            f"          GH_TOKEN: ${{{{ secrets.SECRETS_MIGRATOR_TARGET_PAT }}}}"
-        ]
-        if gh_env_vars:
-            env_lines.append(f"          {gh_env_vars}")
+        # Get scope information for this secret if available
+        scope_info = None
+        if org_secrets_scope and secret_name in org_secrets_scope:
+            scope_info = org_secrets_scope[secret_name]
         
-        env_section = "\n".join(env_lines)
-        
-        step = f"""      - name: Migrate Org Secret - {secret_name}
+        # Base command to create the secret
+        visibility = scope_info.get('visibility', 'all') if scope_info else 'all'
+        selected_repos = scope_info.get('selected_repositories', []) if scope_info else []
+
+        # Build the step based on visibility
+        if visibility == 'selected' and selected_repos:
+            # Create secret with selected visibility and add repositories
+            repos_list = ' '.join(selected_repos)
+            
+            # Build env section with optional GH_HOST
+            env_lines = [
+                f"          TARGET_ORG: '{target_org}'",
+                f"          SECRET_NAME: '{secret_name}'",
+                f"          SECRET_VALUE: ${{{{ secrets.{secret_name} }}}}",
+                f"          GH_TOKEN: ${{{{ secrets.SECRETS_MIGRATOR_TARGET_PAT }}}}",
+                f"          SELECTED_REPOS: '{repos_list}'"
+            ]
+            if gh_env_vars:
+                env_lines.append(f"          {gh_env_vars}")
+            
+            env_section = "\n".join(env_lines)
+            
+            step = f"""      - name: Migrate Org Secret - {secret_name}
+        env:
+{env_section}
+        run: |
+          #!/bin/bash
+          set -e
+
+          echo "=========================================="
+          echo "Migrating organization secret: $SECRET_NAME (with repository scoping)"
+          echo "=========================================="
+
+          # Create secret in target organization with selected visibility
+          if gh secret set "$SECRET_NAME" \\
+            --body "$SECRET_VALUE" \\
+            --org "$TARGET_ORG" \\
+            --visibility selected; then
+            echo "✓ Successfully created '$SECRET_NAME' in organization '$TARGET_ORG' with selected visibility"
+          else
+            echo "❌ ERROR: Failed to create secret '$SECRET_NAME' in target organization '$TARGET_ORG'"
+            exit 1
+          fi
+
+          # Add repositories to the secret scope
+          echo "Adding repositories to secret scope..."
+          IFS=' ' read -r -a REPOS_ARRAY <<< "$SELECTED_REPOS"
+          SUCCESS_COUNT=0
+          FAIL_COUNT=0
+
+          for REPO_NAME in "${{REPOS_ARRAY[@]}}"; do
+            echo "Checking if repository $REPO_NAME exists in $TARGET_ORG..."
+
+            # Check if repo exists using gh api
+            if gh api "repos/$TARGET_ORG/$REPO_NAME" >/dev/null 2>&1; then
+              echo "  Repository $REPO_NAME exists, adding to secret scope..."
+
+              # Get the repository ID
+              REPO_ID=$(gh api "repos/$TARGET_ORG/$REPO_NAME" --jq '.id')
+
+              # Add repository to secret using the GitHub API
+              if gh api \\
+                --method PUT \\
+                "orgs/$TARGET_ORG/actions/secrets/$SECRET_NAME/repositories/$REPO_ID" \\
+                >/dev/null 2>&1; then
+                echo "  ✓ Successfully added $REPO_NAME to secret scope"
+                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+              else
+                echo "  ⚠️  Failed to add $REPO_NAME to secret scope"
+                FAIL_COUNT=$((FAIL_COUNT + 1))
+              fi
+            else
+              echo "  ⚠️  Repository $REPO_NAME does not exist in $TARGET_ORG, skipping"
+              FAIL_COUNT=$((FAIL_COUNT + 1))
+            fi
+          done
+
+          echo ""
+          echo "Summary: $SUCCESS_COUNT repositories added, $FAIL_COUNT skipped"
+
+          if [ $SUCCESS_COUNT -eq 0 ]; then
+            echo "⚠️  Warning: No repositories were added to the secret scope"
+            echo "The secret '$SECRET_NAME' was created with selected visibility but no repositories"
+          fi
+        shell: bash
+"""
+        elif visibility == 'selected':
+            # Secret has selected visibility but no repositories (edge case)
+            # Build env section with optional GH_HOST
+            env_lines = [
+                f"          TARGET_ORG: '{target_org}'",
+                f"          SECRET_NAME: '{secret_name}'",
+                f"          SECRET_VALUE: ${{{{ secrets.{secret_name} }}}}",
+                f"          GH_TOKEN: ${{{{ secrets.SECRETS_MIGRATOR_TARGET_PAT }}}}"
+            ]
+            if gh_env_vars:
+                env_lines.append(f"          {gh_env_vars}")
+            
+            env_section = "\n".join(env_lines)
+            
+            step = f"""      - name: Migrate Org Secret - {secret_name}
+        env:
+{env_section}
+        run: |
+          #!/bin/bash
+          set -e
+
+          echo "=========================================="
+          echo "Migrating organization secret: $SECRET_NAME (selected visibility, no repositories)"
+          echo "=========================================="
+          
+          # Create secret in target organization with selected visibility but no repositories
+          if gh secret set "$SECRET_NAME" \\
+            --body "$SECRET_VALUE" \\
+            --org "$TARGET_ORG" \\
+            --visibility selected; then
+            echo "✓ Successfully migrated '$SECRET_NAME' to organization '$TARGET_ORG' with selected visibility (no repositories)"
+            echo "⚠️  Note: The secret has selected visibility but no repositories in scope"
+          else
+            echo "❌ ERROR: Failed to create secret '$SECRET_NAME' in target organization '$TARGET_ORG'"
+            exit 1
+          fi
+        shell: bash
+"""
+        else:
+            # Create secret with all/private visibility (default behavior)
+            visibility_flag = f" --visibility {visibility}" if visibility in ['all', 'private'] else ""
+            
+            # Build env section with optional GH_HOST
+            env_lines = [
+                f"          TARGET_ORG: '{target_org}'",
+                f"          SECRET_NAME: '{secret_name}'",
+                f"          SECRET_VALUE: ${{{{ secrets.{secret_name} }}}}",
+                f"          GH_TOKEN: ${{{{ secrets.SECRETS_MIGRATOR_TARGET_PAT }}}}"
+            ]
+            if gh_env_vars:
+                env_lines.append(f"          {gh_env_vars}")
+            
+            env_section = "\n".join(env_lines)
+            
+            step = f"""      - name: Migrate Org Secret - {secret_name}
         env:
 {env_section}
         run: |
@@ -199,11 +344,11 @@ def generate_org_secret_steps(org_secrets: List[str], target_org: str, target_en
           echo "=========================================="
           echo "Migrating organization secret: $SECRET_NAME"
           echo "=========================================="
-          
+
           # Create secret in target organization with the value from workflow secrets
           if gh secret set "$SECRET_NAME" \\
             --body "$SECRET_VALUE" \\
-            --org "$TARGET_ORG"; then
+            --org "$TARGET_ORG"{visibility_flag}; then
             echo "✓ Successfully migrated '$SECRET_NAME' to organization '$TARGET_ORG'"
           else
             echo "❌ ERROR: Failed to create secret '$SECRET_NAME' in target organization '$TARGET_ORG'"
@@ -283,19 +428,20 @@ def generate_repo_secret_steps(repo_secrets: List[str], target_org: str, target_
 
 
 def generate_workflow(
-    source_org: str, 
-    source_repo: str, 
-    target_org: str, 
-    target_repo: str, 
-    branch_name: str, 
+    source_org: str,
+    source_repo: str,
+    target_org: str,
+    target_repo: str,
+    branch_name: str,
     env_secrets: Optional[Dict[str, List[str]]] = None,
     org_secrets: Optional[List[str]] = None,
     repo_secrets: Optional[List[str]] = None,
+    org_secrets_scope: Optional[Dict[str, Dict[str, Any]]] = None,
     source_endpoint: str = DEFAULT_GITHUB_ENDPOINT,
     target_endpoint: str = DEFAULT_GITHUB_ENDPOINT
 ) -> str:
     """Generate the GitHub Actions workflow for secret migration.
-    
+
     Args:
         source_org: Source organization
         source_repo: Source repository
@@ -309,6 +455,13 @@ def generate_workflow(
         repo_secrets: Optional list of repository secret names for repo-to-repo migration
                      Example: ['DB_PASSWORD', 'API_KEY', 'DEPLOY_TOKEN']
                      If provided, only these secrets will be migrated (excludes org secrets)
+        org_secrets_scope: Optional dict mapping org secret names to their scope information
+                          Example: {
+                              'SECRET_NAME': {
+                                  'visibility': 'selected',
+                                  'selected_repositories': ['repo1', 'repo2']
+                              }
+                          }
         source_endpoint: Source GitHub API endpoint (default: https://api.github.com)
         target_endpoint: Target GitHub API endpoint (default: https://api.github.com)
     """
@@ -373,7 +526,12 @@ def generate_workflow(
     
     # Org-to-org Migration flow
     if org_secrets:
-        migration_steps += generate_org_secret_steps(org_secrets, target_org, target_endpoint)
+        migration_steps += generate_org_secret_steps(
+            org_secrets=org_secrets,
+            target_org=target_org,
+            org_secrets_scope=org_secrets_scope,
+            target_endpoint=target_endpoint
+        )
         env_steps = ""
     else:
         # Environment secrets only for repo-to-repo migrations
