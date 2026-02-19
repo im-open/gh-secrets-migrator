@@ -14,7 +14,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- use macos-14-large for darwin-amd64 to avoid deprecated macos-13 (930b407)
+- use macos-14 for darwin-amd64 to avoid deprecated macos-13 (930b407)
 
 ### Other
 
