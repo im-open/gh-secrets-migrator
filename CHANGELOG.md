@@ -12,6 +12,24 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - add darwin-arm64 support with matrix build strategy (930b407)
 
+### Changed
+
+- Update platform for macos-14 in release workflow (92bbf85)
+
+### Fixed
+
+- use macos-14-large for darwin-amd64 to avoid deprecated macos-13 (930b407)
+
+### Other
+
+- Add darwin-arm64 build support via matrix strategy (#66) (930b407)
+
+## [0.7.0] - 2026-02-19
+
+### Added
+
+- add darwin-arm64 support with matrix build strategy (930b407)
+
 ### Fixed
 
 - use macos-14 for darwin-amd64 to avoid deprecated macos-13 (930b407)
