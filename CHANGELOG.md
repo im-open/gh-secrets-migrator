@@ -6,6 +6,12 @@ This changelog is auto-generated from [Conventional Commits](https://www.convent
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.3.0] - 2026-01-21
+## [0.8.0] - 2026-02-19
+
+### Other
+
+- Implement repository scoping for organization secret migration (#59) (96dde9b)
+
 ## [0.7.0] - 2026-02-19
 
 ### Added
