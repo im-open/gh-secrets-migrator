@@ -6,6 +6,20 @@ This changelog is auto-generated from [Conventional Commits](https://www.convent
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.3.0] - 2026-01-21
+## [0.9.0] - 2026-02-23
+
+### Added
+
+- Implement authentication logic with token priority (#70) (f95beb4)
+
+### Changed
+
+- Improve secret scoping logic for workflows (25b9a95)
+
+### Other
+
+- Fix org secret migration for selected visibility with empty repository list (#69) (25b9a95)
+
 ## [0.8.0] - 2026-02-19
 
 ### Other
