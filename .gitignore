@@ -1,3 +1,6 @@
+# My Personal Ignores
+venv-scripts
+
 # Python
 __pycache__/
 *.py[cod]

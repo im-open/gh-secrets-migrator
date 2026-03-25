@@ -144,18 +144,18 @@ class TestRateLimitHandling:
         # Mock the new PyGithub 2.7.0+ API structure: resources.core
         reset_time = datetime.now(timezone.utc).timestamp() + 3600  # 1 hour from now
         reset_datetime = datetime.fromtimestamp(reset_time, tz=timezone.utc)
-        
+
         mock_core = Mock()
         mock_core.remaining = 4500
         mock_core.limit = 5000
         mock_core.reset = reset_datetime
-        
+
         mock_resources = Mock()
         mock_resources.core = mock_core
-        
+
         mock_rate_limit = Mock()
         mock_rate_limit.resources = mock_resources
-        
+
         github_client.client.get_rate_limit.return_value = mock_rate_limit
 
         # Execute
@@ -182,7 +182,7 @@ class TestRateLimitHandling:
         assert result['limit'] == -1
         assert result['reset_time'] == -1
         assert result['reset_in_seconds'] == -1
-        
+
         # Verify debug log was called
         mock_logger.debug.assert_called()
 
@@ -212,11 +212,11 @@ class TestRateLimitHandling:
     def test_log_rate_limit_logs_info_on_success(self, github_client, mock_logger):
         """Test that _log_rate_limit logs rate limit info when successful."""
         from datetime import datetime, timezone
-        
+
         reset_datetime = datetime.fromtimestamp(
             datetime.now(timezone.utc).timestamp() + 3600, tz=timezone.utc
         )
-        
+
         mock_core = Mock(remaining=4000, limit=5000, reset=reset_datetime)
         mock_resources = Mock(core=mock_core)
         mock_rate_limit = Mock(resources=mock_resources)
@@ -264,11 +264,11 @@ class TestMigrationResilienceWithRateLimitFailures:
         # Setup mock repo with secrets
         mock_secret1 = Mock()
         mock_secret1.name = "SECRET_1"
-        mock_secret1.raw_data = {}
+        mock_secret1._rawData = {'name': 'SECRET_1'}
         mock_secret2 = Mock()
         mock_secret2.name = "SECRET_2"
-        mock_secret2.raw_data = {}
-        
+        mock_secret2._rawData = {'name': 'SECRET_2'}
+
         mock_repo = Mock()
         mock_repo.get_secrets.return_value = [mock_secret1, mock_secret2]
         github_client_with_failing_rate_limit.client.get_repo.return_value = mock_repo
@@ -303,10 +303,10 @@ class TestMigrationResilienceWithRateLimitFailures:
         """Test that fallback rate limit values don't block operations."""
         # Get rate limit info (will fail and return fallback)
         rate_info = github_client_with_failing_rate_limit.get_rate_limit_info()
-        
+
         # Verify fallback values
         assert rate_info['remaining'] == -1
-        
+
         # Now verify we can still perform operations
         mock_repo = Mock()
         mock_repo.default_branch = "main"

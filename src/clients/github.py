@@ -61,6 +61,29 @@ class GitHubClient:
                 f"(resets in ~{info['reset_in_seconds']}s)"
             )
 
+    @staticmethod
+    def _safe_raw_data(obj: Any) -> Dict[str, Any]:
+        """Return PyGithub internal raw data without triggering lazy completion."""
+        raw = getattr(obj, "_rawData", None)
+        if isinstance(raw, dict):
+            return raw
+        return {}
+
+    @classmethod
+    def _safe_field_str(cls, obj: Any, field_name: str) -> str:
+        """Read a string field without accessing completion-prone public properties."""
+        raw = cls._safe_raw_data(obj)
+        raw_value = raw.get(field_name)
+        if isinstance(raw_value, str):
+            return raw_value
+
+        private_attr = getattr(obj, f"_{field_name}", None)
+        private_value = getattr(private_attr, "value", None)
+        if isinstance(private_value, str):
+            return private_value
+
+        return ""
+
     def get_default_branch(self, org: str, repo: str) -> str:
         """Get the default branch of a repository."""
         try:
@@ -99,7 +122,7 @@ class GitHubClient:
 
     def list_repo_secrets(self, org: str, repo: str) -> List[str]:
         """List all repository-level secrets (excludes organization secrets).
-        
+
         GitHub's repository secrets API returns both repository-level and
         organization-level secrets that are visible to the repository.
         This method filters out organization secrets by checking for the
@@ -108,18 +131,24 @@ class GitHubClient:
         try:
             repository = self.client.get_repo(f"{org}/{repo}")
             secrets = repository.get_secrets()
-            
+
             # Filter out organization secrets
             # Org secrets have a 'visibility' field; repo secrets don't
             result = []
             for secret in secrets:
-                # Access raw_data to check for visibility field
-                if hasattr(secret, 'raw_data') and 'visibility' in secret.raw_data:
+                # Use PyGithub's internal payload to avoid triggering completion
+                # on list-returned objects that can be missing a URL.
+                secret_raw = self._safe_raw_data(secret)
+                if 'visibility' in secret_raw:
                     # This is an organization secret, skip it
-                    self.log.debug(f"Skipping organization secret: {secret.name}")
+                    secret_name = self._safe_field_str(secret, "name") or "<unknown>"
+                    self.log.debug(f"Skipping organization secret: {secret_name}")
                     continue
-                result.append(secret.name)
-            
+
+                secret_name = self._safe_field_str(secret, "name")
+                if secret_name:
+                    result.append(secret_name)
+
             self._log_rate_limit(f"list_repo_secrets({org}/{repo})")
             return result
         except Exception as e:
@@ -393,25 +422,37 @@ class GitHubClient:
 
             secrets_info = {}
             for secret in secrets:
+                secret_name = self._safe_field_str(secret, "name")
+                if not secret_name:
+                    self.log.debug("Skipping organization secret with missing name")
+                    continue
+
+                # Read visibility from list payload to avoid lazy completion.
+                secret_raw = self._safe_raw_data(secret)
+                visibility = secret_raw.get("visibility")
+                if not isinstance(visibility, str):
+                    visibility = self._safe_field_str(secret, "visibility") or "all"
+
                 scope_info = {
-                    'visibility': secret.visibility,
+                    'visibility': visibility,
                     'selected_repositories': []
                 }
 
                 # Only fetch selected repositories if visibility is "selected"
-                if secret.visibility == "selected":
+                if visibility == "selected":
                     try:
                         repos = secret.selected_repositories
                         scope_info['selected_repositories'] = [
-                            repo.name for repo in repos
+                            self._safe_field_str(repo, "name") for repo in repos
+                            if self._safe_field_str(repo, "name")
                         ]
                     except Exception as e:
                         self.log.debug(
                             f"Failed to fetch selected repositories "
-                            f"for {secret.name}: {e}"
+                            f"for {secret_name}: {e}"
                         )
 
-                secrets_info[secret.name] = scope_info
+                secrets_info[secret_name] = scope_info
 
             self._log_rate_limit(f"get_org_secrets_with_scope({org})")
             self.log.debug(
