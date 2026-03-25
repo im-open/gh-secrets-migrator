@@ -30,10 +30,10 @@ jobs:
           set -euo pipefail
           CURRENT_TAG="v${{ steps.version.outputs.version }}"
           echo "📌 Current tag: $CURRENT_TAG"
-          
+
           # Get the tag before the current one by excluding it from the sorted list
           PREV_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -v "^${CURRENT_TAG}$" | head -1)
-          
+
           if [ -z "$PREV_TAG" ]; then
             # If no previous tag, use the first commit
             PREV_TAG=$(git rev-list --max-parents=0 HEAD)
@@ -41,7 +41,7 @@ jobs:
           else
             echo "📌 Previous tag: $PREV_TAG"
           fi
-          
+
           echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
 
       - name: Generate and update CHANGELOG
@@ -51,38 +51,38 @@ jobs:
           PREV_TAG=${{ steps.prev_tag.outputs.prev_tag }}
           CURRENT_TAG="v$VERSION"
           DATE=$(date -u +%Y-%m-%d)
-          
+
           echo "📝 Generating changelog for $PREV_TAG..$CURRENT_TAG"
-          
+
           # Categorize commits by type
           > /tmp/added.txt
           > /tmp/changed.txt
           > /tmp/fixed.txt
           > /tmp/other.txt
           > /tmp/processed_messages.txt
-          
+
           # Function to categorize a single line
           categorize_line() {
             local line="$1"
             local hash="$2"
-            
+
             # Skip empty lines
             [ -z "$line" ] && return
-            
+
             # Skip if already processed (dedup)
             if grep -qFx "$line" /tmp/processed_messages.txt 2>/dev/null; then
               return
             fi
             echo "$line" >> /tmp/processed_messages.txt
-            
+
             # Extract message without the prefix for cleaner output
             clean_msg=$(echo "$line" | sed -E 's/^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]*\))?!?:\s*//')
-            
+
             # Add hash if provided and not already in message
             if [ -n "$hash" ] && ! echo "$clean_msg" | grep -qE '\([a-f0-9]+\)$'; then
               clean_msg="$clean_msg ($hash)"
             fi
-            
+
             if echo "$line" | grep -qE '^feat(\([^)]*\))?!?:'; then
               echo "- $clean_msg" >> /tmp/added.txt
             elif echo "$line" | grep -qE '^fix(\([^)]*\))?!?:'; then
@@ -99,24 +99,24 @@ jobs:
               fi
             fi
           }
-          
+
           # Process all commits (including merge commits) with full body
           # Use a unique delimiter that won't appear in commit messages
           DELIM="---COMMIT_END---"
-          
+
           git log --format="%H%n%s%n%b%n$DELIM" "$PREV_TAG".."$CURRENT_TAG" | while IFS= read -r hash; do
             # Read subject line
             IFS= read -r subject || true
-            
+
             # Read body lines until delimiter
             body=""
             while IFS= read -r bodyline; do
               [ "$bodyline" = "$DELIM" ] && break
               body="$body$bodyline"$'\n'
             done
-            
+
             short_hash="${hash:0:7}"
-            
+
             # First, check if the subject itself is a conventional commit
             if echo "$subject" | grep -qE '^(feat|fix|refactor|perf|build|ci|style|docs|test|chore|revert)(\([^)]*\))?!?:'; then
               categorize_line "$subject" "$short_hash"
@@ -135,59 +135,59 @@ jobs:
                   found_in_body=true
                 fi
               done
-              
+
               # If nothing found in body and subject isn't a merge commit, add subject to other
               if [ "$found_in_body" = false ] && ! echo "$subject" | grep -qE '^Merge (pull request|branch)'; then
                 categorize_line "$subject" "$short_hash"
               fi
             fi
           done
-          
+
           # Check if any commits were found
           if [ ! -s /tmp/added.txt ] && [ ! -s /tmp/changed.txt ] && [ ! -s /tmp/fixed.txt ] && [ ! -s /tmp/other.txt ]; then
             echo "⚠️ No categorizable commits found between $PREV_TAG and $CURRENT_TAG"
             echo "- Release $VERSION" > /tmp/other.txt
           fi
-          
+
           # Create the new changelog entry file
           echo "## [$VERSION] - $DATE" > /tmp/new_entry.txt
-          
+
           if [ -s /tmp/added.txt ]; then
             echo "" >> /tmp/new_entry.txt
             echo "### Added" >> /tmp/new_entry.txt
             echo "" >> /tmp/new_entry.txt
             cat /tmp/added.txt >> /tmp/new_entry.txt
           fi
-          
+
           if [ -s /tmp/changed.txt ]; then
             echo "" >> /tmp/new_entry.txt
             echo "### Changed" >> /tmp/new_entry.txt
             echo "" >> /tmp/new_entry.txt
             cat /tmp/changed.txt >> /tmp/new_entry.txt
           fi
-          
+
           if [ -s /tmp/fixed.txt ]; then
             echo "" >> /tmp/new_entry.txt
             echo "### Fixed" >> /tmp/new_entry.txt
             echo "" >> /tmp/new_entry.txt
             cat /tmp/fixed.txt >> /tmp/new_entry.txt
           fi
-          
+
           if [ -s /tmp/other.txt ]; then
             echo "" >> /tmp/new_entry.txt
             echo "### Other" >> /tmp/new_entry.txt
             echo "" >> /tmp/new_entry.txt
             cat /tmp/other.txt >> /tmp/new_entry.txt
           fi
-          
+
           echo "" >> /tmp/new_entry.txt
-          
+
           # Find insertion point (after [Unreleased] section or after header)
           if grep -n "^## \[Unreleased\]" CHANGELOG.md > /dev/null; then
             # Find the next ## heading after [Unreleased]
             UNRELEASED_LINE=$(grep -n "^## \[Unreleased\]" CHANGELOG.md | cut -d: -f1)
             NEXT_SECTION=$(tail -n +"$((UNRELEASED_LINE + 1))" CHANGELOG.md | grep -n "^## \[" | head -1 | cut -d: -f1)
-            
+
             if [ -n "$NEXT_SECTION" ]; then
               INSERT_LINE=$((UNRELEASED_LINE + NEXT_SECTION))
             else
@@ -203,7 +203,7 @@ jobs:
               INSERT_LINE=$(wc -l < CHANGELOG.md)
             fi
           fi
-          
+
           # Reconstruct the file
           TOTAL_LINES=$(wc -l < CHANGELOG.md)
           if [ "$INSERT_LINE" -lt "$TOTAL_LINES" ]; then
@@ -217,11 +217,11 @@ jobs:
             cat /tmp/new_entry.txt >> /tmp/changelog_new.md
           fi
           mv /tmp/changelog_new.md CHANGELOG.md
-          
+
           echo "✅ Changelog updated for version $VERSION"
           echo "--- Preview ---"
           head -40 CHANGELOG.md
-          
+
           # Save the new entry for release notes (remove the version header for cleaner notes)
           tail -n +2 /tmp/new_entry.txt > /tmp/release_notes.md
           echo "--- Release Notes ---"
@@ -258,16 +258,16 @@ jobs:
               status: 'completed',
               per_page: 1
             });
-            
+
             if (runs.data.workflow_runs.length === 0) {
               core.setFailed('No test-and-lint workflow runs found on master branch!');
               return;
             }
-            
+
             const latestRun = runs.data.workflow_runs[0];
             console.log(`Latest test-and-lint run: ${latestRun.html_url}`);
             console.log(`Status: ${latestRun.conclusion}`);
-            
+
             if (latestRun.conclusion !== 'success') {
               core.setFailed(`Latest test-and-lint on master did not pass (status: ${latestRun.conclusion}). Please fix tests before releasing.`);
             } else {
@@ -298,10 +298,24 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Build and publish extension
-        uses: cli/gh-extension-precompile@v2
-        with:
-          build_script_override: "script/build.sh"
+      - name: Build extension
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          bash script/build.sh "$TAG"
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          # Create the release if it doesn't exist yet (other parallel jobs may beat us to it)
+          gh release create "$TAG" --title "$TAG" --notes "Release $TAG" 2>/dev/null || true
+          # Upload all built binaries from dist/
+          for file in dist/*; do
+            gh release upload "$TAG" "$file" --clobber
+          done
 
       - name: Download release notes
         uses: actions/download-artifact@v8
