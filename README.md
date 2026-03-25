@@ -7,6 +7,26 @@
 
 A GitHub CLI extension to migrate GitHub repository secrets from a source repository to a target repository using GitHub Actions workflows. Written in Python and compiled to native binaries using PyInstaller.
 
+## Fork Notice — PyGithub IncompletableObject Fix
+
+This is a patched fork of the original [renan-alm/gh-secrets-migrator](https://github.com/renan-alm/gh-secrets-migrator) that fixes a crash when listing secrets with PyGithub 2.1.0+.
+
+**Problem:** The original code accessed `secret.raw_data`, `secret.visibility`, and `secret.selected_repositories` directly on list-returned PyGithub objects. In PyGithub 2.1.0+, these objects are lazy-completable and lack a URL in their payload, so any property access that triggers completion raises:
+```
+IncompletableObject: Cannot complete object as it contains no URL: 400
+```
+
+**Fix:** Added two safe accessor methods to `GitHubClient` in `src/clients/github.py`:
+
+- `_safe_raw_data(obj)` — Returns the raw payload dict directly from PyGithub's internal `_rawData` attribute, bypassing the property that triggers completion.
+- `_safe_field_str(obj, field_name)` — Reads a string field from `_rawData` first, then falls back to the private `_<field_name>.value` attribute if not present in the raw payload.
+
+`list_repo_secrets()` was updated to use `_safe_raw_data()` to check the `visibility` field (to filter out org-scoped secrets) and `_safe_field_str()` to read the secret name — instead of accessing `secret.raw_data` and `secret.name` directly.
+
+`get_org_secrets_with_scope()` was similarly updated: `visibility` and `selected_repositories` are now read safely from the raw payload, and `selected_repositories` is only fetched at all when `visibility == "selected"` (avoiding a redundant API call in other cases).
+
+A regression test (`CompletionProneSecret`) was added to `tests/test_org_secret_filtering.py` that raises `IncompletableObject` if any completion-prone property is accessed, ensuring this fix cannot silently regress. The fix is fully backward-compatible — no CLI flags, outputs, or behavior changed.
+
 ## Features
 
 - ✨ Migrates secrets from one GitHub repository to another
