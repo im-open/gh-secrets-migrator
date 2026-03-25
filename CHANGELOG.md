@@ -6,6 +6,12 @@ This changelog is auto-generated from [Conventional Commits](https://www.convent
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.3.0] - 2026-01-21
+## [0.1.2] - 2026-03-25
+
+### Other
+
+- use github (2d0eb6c)
+
 ## [0.9.0] - 2026-02-23
 
 ### Added
