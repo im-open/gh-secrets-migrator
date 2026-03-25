@@ -1,4 +1,5 @@
-"""Standalone repro and debug helper for PyGithub IncompletableObject behavior.
+"""
+Standalone repro and debug helper for PyGithub IncompletableObject behavior.
 
 This script demonstrates:
 1) The old completion-prone filtering pattern that can fail.
