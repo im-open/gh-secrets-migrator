@@ -58,6 +58,12 @@ from src.core.workflow_generator import normalize_endpoint
     help="Skip environment recreation (by default environments are recreated)"
 )
 @click.option(
+    "--skip-existing",
+    is_flag=True,
+    envvar="SKIP_EXISTING",
+    help="Skip secrets that already exist in the target (by default existing secrets are overwritten)"
+)
+@click.option(
     "--org-to-org",
     is_flag=True,
     envvar="ORG_TO_ORG",
@@ -84,6 +90,7 @@ def migrate(
     target_pat,
     verbose,
     skip_envs,
+    skip_existing,
     org_to_org,
     source_endpoint,
     target_endpoint,
@@ -180,6 +187,7 @@ def migrate(
             target_pat=target_pat_value,
             verbose=verbose,
             skip_envs=skip_envs,
+            skip_existing=skip_existing,
             org_to_org=org_to_org,
             source_endpoint=source_endpoint,
             target_endpoint=target_endpoint

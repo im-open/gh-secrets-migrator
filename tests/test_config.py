@@ -62,7 +62,32 @@ class TestMigrationConfig:
         )
         assert config.verbose is True
 
-    def test_config_all_flags(self):
+    def test_config_skip_existing(self):
+        """Test skip_existing configuration."""
+        config = MigrationConfig(
+            source_org="source-org",
+            source_repo="source-repo",
+            target_org="target-org",
+            target_repo="target-repo",
+            source_pat="test-pat",
+            target_pat="test-pat",
+            skip_existing=True,
+        )
+        assert config.skip_existing is True
+
+    def test_config_skip_existing_default(self):
+        """Test that skip_existing defaults to False."""
+        config = MigrationConfig(
+            source_org="source-org",
+            source_repo="source-repo",
+            target_org="target-org",
+            target_repo="target-repo",
+            source_pat="test-pat",
+            target_pat="test-pat",
+        )
+        assert config.skip_existing is False
+
+
         """Test configuration with all flags set."""
         config = MigrationConfig(
             source_org="source-org",
