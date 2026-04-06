@@ -6,6 +6,20 @@ This changelog is auto-generated from [Conventional Commits](https://www.convent
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.3.0] - 2026-01-21
+## [0.1.4] - 2026-04-06
+
+### Added
+
+- add --skip-existing flag to skip secrets that already exist in target (14a59c3)
+
+### Fixed
+
+- shorten --skip-existing help text to fix E501 line too long lint error (1bcdbf8)
+
+### Other
+
+- update readme (e958e26)
+
 ## [0.1.3] - 2026-03-25
 
 ### Other
