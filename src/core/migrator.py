@@ -409,7 +409,23 @@ class Migrator:
                 for name, scope_info in org_secrets_with_scope.items()
                 if name not in ("SECRETS_MIGRATOR_PAT", "SECRETS_MIGRATOR_TARGET_PAT", "SECRETS_MIGRATOR_SOURCE_PAT")
             }
-            
+
+            # If --skip-existing is set, filter out org secrets that already exist in the target
+            if self.config.skip_existing and secrets_to_migrate:
+                self.log.info("Checking target organization for existing secrets (--skip-existing)...")
+                existing_target_org_secrets = self.target_api.list_org_secrets(self.config.target_org)
+                existing_target_org_set = set(existing_target_org_secrets)
+                skipped_org = [name for name in secrets_to_migrate if name in existing_target_org_set]
+                secrets_to_migrate = {
+                    name: scope_info
+                    for name, scope_info in secrets_to_migrate.items()
+                    if name not in existing_target_org_set
+                }
+                if skipped_org:
+                    self.log.info(f"Skipping already existing organization secrets ({len(skipped_org)} total):")
+                    for name in skipped_org:
+                        self.log.info(f"  - {name} (already exists in target organization)")
+
             if not secrets_to_migrate:
                 self.log.info("No organization secrets to migrate (found only system secrets)")
                 return
@@ -589,6 +605,20 @@ class Migrator:
             if name not in ("github_token", "SECRETS_MIGRATOR_PAT", "SECRETS_MIGRATOR_TARGET_PAT", "SECRETS_MIGRATOR_SOURCE_PAT")
         ]
 
+        # If --skip-existing is set, filter out secrets that already exist in the target
+        if self.config.skip_existing and secrets_to_migrate:
+            self.log.info("Checking target repository for existing secrets (--skip-existing)...")
+            existing_target_secrets = self.target_api.list_repo_secrets(
+                self.config.target_org, self.config.target_repo
+            )
+            existing_target_set = set(existing_target_secrets)
+            skipped = [name for name in secrets_to_migrate if name in existing_target_set]
+            secrets_to_migrate = [name for name in secrets_to_migrate if name not in existing_target_set]
+            if skipped:
+                self.log.info(f"Skipping already existing secrets ({len(skipped)} total):")
+                for name in skipped:
+                    self.log.info(f"  - {name} (already exists in target)")
+
         if not secrets_to_migrate:
             self.log.info("No secrets to migrate (found only system secrets)")
             return
@@ -602,6 +632,25 @@ class Migrator:
         env_secrets_info = self.source_api.list_all_environments_with_secrets(
             self.config.source_org, self.config.source_repo
         )
+
+        # If --skip-existing is set, filter out environment secrets that already exist in the target
+        if self.config.skip_existing and env_secrets_info:
+            self.log.info("Checking target repository for existing environment secrets (--skip-existing)...")
+            filtered_env_secrets_info = {}
+            for env_name, env_secret_names in env_secrets_info.items():
+                existing_env_secrets = self.target_api.list_environment_secrets(
+                    self.config.target_org, self.config.target_repo, env_name
+                )
+                existing_env_set = set(existing_env_secrets)
+                skipped_env = [name for name in env_secret_names if name in existing_env_set]
+                kept = [name for name in env_secret_names if name not in existing_env_set]
+                if skipped_env:
+                    self.log.info(
+                        f"  Skipping {len(skipped_env)} already existing secret(s) in environment '{env_name}': "
+                        f"{', '.join(skipped_env)}"
+                    )
+                filtered_env_secrets_info[env_name] = kept
+            env_secrets_info = filtered_env_secrets_info
         
         self._check_rate_limits("after_listing_secrets")
         
