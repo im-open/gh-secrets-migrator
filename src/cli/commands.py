@@ -61,7 +61,7 @@ from src.core.workflow_generator import normalize_endpoint
     "--skip-existing",
     is_flag=True,
     envvar="SKIP_EXISTING",
-    help="Skip secrets that already exist in the target (by default existing secrets are overwritten)"
+    help="Skip secrets that already exist in the target (existing secrets are not overwritten)"
 )
 @click.option(
     "--org-to-org",
